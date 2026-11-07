@@ -1,241 +1,85 @@
-# LLM-distilled-scheduling-CPN
-Source code and simulation environment for the paper: "LLM-Distilled Preference Control and Conflict-Aware Multi-Objective Scheduling in Computing Power Networks".
-# LC-MOSAC reproducibility package
+# LC-MOSAC simulation input generator
 
-Release: **1.0.0 (2026-09-29)**
+This package generates topology, task arrivals and attributes, and resource
+trajectories. It does not perform model training or scheduling evaluation,
+and does not provide trained models or performance results.
 
-This folder is the cleaned experiment package for the Computer Networks
-manuscript. It contains the final one-step, non-dueling LC-MOSAC implementation,
-the frozen preference data/model, all formal experiment entry points, the raw
-runs used by the paper, and the final figure/table source data.
+The reference CSV dataset is deposited at
+https://doi.org/10.5281/zenodo.23118195.
+This repository provides generation code, not the complete scheduling software.
+Dataset files and their column definitions belong to the data deposit's README;
+the instructions below describe how to generate the inputs locally.
 
-Development-only pilots, architecture searches, legacy dueling variants,
-N-step and Retrace experiments, orthogonal/residual critic trials, temporary
-diagnostics, and `test_*.py` files are intentionally excluded.
+## Run
 
-## 1. Verify the package first
+Use Python 3.9 to 3.12 for the pinned NumPy version. From this directory:
 
-From this directory, run:
-
-```powershell
-python verify_release.py
-python run_final_paper_results_v2_pycharm.py --check-only
-python run_formula_parameter_sensitivity.py --check-only
+```sh
+python -m pip install -r requirements.txt
+python generate_dataset.py
 ```
 
-The first command checks the code, frozen artifacts, seed coverage, final
-outputs, and optional SHA-256 manifest. The other two commands execute the
-paper-specific protocol guards without retraining.
+Output is written to `simulation_inputs_v1/`. To use another location:
 
-For a single stable entry point, the equivalent release-level commands are:
-
-```powershell
-python reproduce.py verify
-python reproduce.py analyze
-python reproduce.py train
-python reproduce.py all
+```sh
+python generate_dataset.py --output another_output
 ```
 
-Use `--dry-run` to print the underlying commands. The version suffixes retained
-in several internal script and result names identify frozen experimental
-protocols; `reproduce.py` is the public entry point for this release.
+Existing output files are never overwritten. No GPU, PyTorch, or LLM API is needed.
+The generated output directory is excluded by `.gitignore` because the data
+are distributed separately. Upload the source files in this directory to GitHub.
 
-## 2. Environment
+## Files
 
-The recommended setup is:
+- `environment.py`: simulator implementing topology, task, and resource generation.
+- `config.py`: configuration parameters for the simulation environment.
+- `generate_dataset.py`: entry point for exporting simulation inputs to CSV files.
+- `requirements.txt`: pinned NumPy dependency for the generation configuration.
 
-```powershell
-conda env create -f environment.yml
-conda activate lc-mosac
-```
+## Generation and scope
 
-See `ENVIRONMENT.md` for the exact versions used in the final verification.
+Topology uses `ComputingPowerNetworkEnv._build_topology()` with seed 17.
+Tasks use `ComputingPowerNetworkEnv.sample_episode(task_seed, load_scale)`.
+Resources use `ComputingPowerNetworkEnv._advance_exogenous_state()` once per
+slot, including empty slots. Resource generation is independent of policy actions.
+Slot and node indices start at zero.
 
-## 3. Frozen artifacts
+The export contains 40 episodes: 25 training examples, 5 validation episodes,
+and 10 test episodes. Training examples use run seeds 2026 to 2030 and episodes
+1, 125, 250, 375, and 500 of a configured 500-episode sequence. For run
+seed s and episode e, the resource seed is s + 37e, task seed is s + 37e + 10000,
+and load scale is element e-1 of 500 uniform draws on [0.75, 1.25] using seed
+s + 777. Validation resource seeds are 310001 to 310005, with load scales
+evenly spaced on [0.85, 1.15]. Test resource seeds are 410001 to 410010, with
+load scales evenly spaced on [0.80, 1.20]. Evaluation task seeds equal resource
+seeds plus 50000.
 
-`artifacts_v4/` contains the 400 offline DeepSeek labels, their prompt and
-sampling manifest, the trained 13-96-96-2 preference student, and validation
-metrics. Formal experiments load `artifacts_v4/preference_student.pt`.
+The dataset contains a fixed collection of simulation input examples.
+The training, validation, and test labels identify the subsets defined by the
+export configuration. These labels do not indicate that model training or
+evaluation is performed by this package. The files contain no scheduling
+decisions, trained models, or performance results.
 
-The stored labels make all paper experiments independent of the live LLM API.
-`generate_llm_preferences.py` is retained only for auditing or deliberately
-creating a new label set. A new API call is not expected to be bitwise identical
-to the frozen labels.
+## Output
 
-## 4. Simulation input dataset
+| File | Contents |
+| --- | --- |
+| topology.csv | Nominal node capacity, transmission rate, propagation delay and power |
+| episodes.csv | Episode identifiers, splits, seeds, load scales and task counts |
+| tasks.csv | Task size, computational density and required cycles per arrival |
+| resource_dynamics.csv | Resource factors and effective rates/capacities per slot and node |
+| metadata.json | Configuration, export scope, runtime NumPy version and source hashes |
 
-The directory `datasets/simulation_inputs_v1/` contains an archived snapshot
-of the policy-independent inputs generated by the LC-MOSAC simulator. Adding
-this dataset does not change the training or evaluation implementation.
+The metadata records this export's configuration, scope, NumPy version, and
+source hashes. It is not intended to reproduce the metadata of an earlier export.
+Source hashes refer to the three Python files in the generator repository,
+not to files included in the data deposit.
 
-The dataset contains 40 episodes: 25 representative training episodes, all
-five validation episodes, and all ten independent test episodes. For each
-formal training seed in `{2026, 2027, 2028, 2029, 2030}`, episodes 1, 125,
-250, 375, and 500 are retained as representative training examples. The full
-training stream remains reproducible from the original simulator and seeds.
+## Verification
 
-| File | Description |
-|---|---|
-| `topology.csv` | Fixed computing, communication, propagation, and power parameters of the ten nodes. |
-| `episodes.csv` | Data split, episode identifiers, random seeds, load scales, time-slot counts, and task counts. |
-| `tasks.csv` | Task arrival slots, data sizes, computation densities, and required computing cycles. |
-| `resource_dynamics.csv` | Slot-level communication-rate and computing-capacity trajectories for every node. |
-| `metadata.json` | Dataset version, simulator configuration, split definitions, and source-code hashes. |
-
-The files contain exogenous simulation inputs only. They do not contain
-scheduling actions, policy-dependent queue states, trained models, delay
-measurements, energy measurements, or other performance outcomes.
-
-### Data generation
-
-The dataset was generated from the original simulator implementation in
-`environment.py`. No separate dataset-generation module is required by the
-experiments.
-
-The fixed node topology is generated by:
-
-```python
-ComputingPowerNetworkEnv._build_topology()
-```
-
-with topology seed `17`. Task arrivals and task attributes are generated by:
-
-```python
-ComputingPowerNetworkEnv.sample_episode(seed, load_scale)
-```
-
-For each one-second slot, this function updates the configured burst process,
-samples the number of arriving tasks from a Poisson distribution, and samples
-task sizes and computation densities from the ranges in `EnvironmentConfig`.
-
-Time-varying communication and computing resources are generated by:
-
-```python
-ComputingPowerNetworkEnv._advance_exogenous_state()
-```
-
-This function updates the link and capacity factors through the autoregressive
-process defined in `EnvironmentConfig`.
-
-An episode is reconstructed in memory by the existing simulator as follows:
-
-```python
-from config import EnvironmentConfig
-from environment import ComputingPowerNetworkEnv
-
-env = ComputingPowerNetworkEnv(
-    EnvironmentConfig(),
-    topology_seed=17,
-)
-
-tasks = env.sample_episode(
-    seed=task_seed,
-    load_scale=load_scale,
-)
-
-state, action_mask = env.reset(
-    seed=episode_seed,
-    tasks=tasks,
-)
-```
-
-The values of `task_seed`, `episode_seed`, and `load_scale` for every archived
-episode are recorded in `episodes.csv`.
-
-The validation episodes use resource seeds `310001` to `310005` and task seeds
-`360001` to `360005`. The independent test episodes use resource seeds
-`410001` to `410010` and task seeds `460001` to `460010`.
-
-The formal training and evaluation scripts continue to generate simulation
-inputs online from the original environment functions. They do not load the
-stored CSV files. The CSV files are provided for inspection, reuse, and
-independent verification of the simulation inputs.
-
-## 5. Formal experiment entry points
-
-Run the stages below from this directory. Existing completed runs are skipped.
-For a genuinely independent rerun, work in a second copy and remove or rename
-the corresponding `results_*` directory in that copy before starting.
-
-```powershell
-# Main comparison, internal preference control, and PCGrad ablation
-python run_final_confirmatory_all_pycharm.py
-
-# MODQN, MO-PPO, and AW-DQN-2obj formal external baselines
-python run_external_baselines_pycharm.py
-python run_external_baselines_analysis_pycharm.py
-
-# Prospective PCGrad stability experiment (seeds 12036--12040)
-python run_pcgrad_stability_confirmation_all_pycharm.py
-
-# Robustness baselines and final no-dueling LC-MOSAC robustness runs
-python run_robustness_experiment_pycharm.py
-python run_revised_robustness_v7_pycharm.py
-python run_revised_analysis_v7_pycharm.py
-
-# Frozen-teacher/student fidelity and latency benchmark
-python run_student_distillation_benchmark_pycharm.py
-
-# Formula-parameter sensitivity analysis using frozen final checkpoints
-python run_formula_parameter_sensitivity.py
-```
-
-`run_robustness_experiment_pycharm.py` is release-cleaned to run only the
-Fixed-MOSAC and PC-MOSAC baseline data used in the paper. The proposed method
-under shifted workloads is produced by `run_revised_robustness_v7_pycharm.py`.
-
-## 6. Rebuild paper outputs from frozen runs
-
-The following commands regenerate the statistical summaries and manuscript
-figures without model training:
-
-```powershell
-python run_confirmatory_analysis_pycharm.py
-python run_external_baselines_analysis_pycharm.py
-python run_pcgrad_stability_confirmation_analysis_pycharm.py
-python run_revised_analysis_v7_pycharm.py
-python run_final_paper_results_pycharm.py
-python run_final_paper_results_v2_pycharm.py
-python plot_pcgrad_motivation_figure.py
-python run_formula_parameter_sensitivity.py --analyze-only
-```
-
-The canonical consolidated output is `results_summary_final_paper_v2/`.
-Formula-sensitivity outputs are in `results_formula_parameter_sensitivity/`.
-
-## 7. Result-to-paper map
-
-| Paper evidence | Frozen source |
-|---|---|
-| Main six-method comparison | `results_confirmatory_main_five_seed/` and `results_external_baselines_five_seed_v3/` |
-| Preference-controller and PCGrad ablations | `results_confirmatory_main_five_seed/anchor-mosac-no-dueling/` and `results_confirmatory_pcgrad_ablation_five_seed/` |
-| State-dependent preference response | `results_summary_confirmatory_five_seed/` |
-| Student fidelity and latency | `results_summary_student_distillation_benchmark/` |
-| Prospective PCGrad stability and motivation | `results_pcgrad_stability_confirmation_five_seed/` |
-| Nominal/heavy-load/volatile robustness | `results_ablation_v6_five_seed/`, `results_robustness_v6_five_seed/`, and `results_revised_robustness_v7_five_seed/` |
-| Formula-parameter sensitivity | `results_formula_parameter_sensitivity/` |
-| Final tables, figures, and source data | `results_summary_final_paper_v2/` |
-
-Some frozen JSON metadata records absolute paths from the original workstation.
-For this archival release, those provenance-only fields have been converted to
-portable package-relative paths. Runtime paths are resolved relative to this
-folder by `project_root()`.
-
-## 8. Package integrity
-
-`PACKAGE_MANIFEST.csv` lists every released file with its size and category.
-`SHA256SUMS.txt` records SHA-256 hashes. Re-run `python verify_release.py` after
-copying or extracting the folder to detect incomplete transfers.
-
-## 9. Citation, repository metadata, and licensing
-
-`CITATION.cff` records the release authors and manuscript citation.
-`REPOSITORY_METADATA.md` contains copy-ready deposit metadata, and
-`DATA_AND_CODE_AVAILABILITY.md` contains the manuscript statement to complete
-after a repository DOI is issued. `RELEASE_NOTES.md` describes the archival
-scope.
-
-No software or data license is selected in this folder because licensing is a
-legal decision for all authors. Select the intended license in the repository
-interface before public release. The package can be shared privately with the
-journal for peer review while that decision is pending.
+All headers and field values in all four generated CSVs were compared with the
+local reference dataset and matched exactly: 10 topology rows, 40 episode rows,
+30,051 task rows, and 32,000 resource rows. This export check ran with NumPy
+2.3.5; requirements.txt specifies NumPy 1.26.4, the version recorded for the
+reference dataset. The generated metadata and this README are not part of the
+CSV equivalence claim.
